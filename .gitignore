@@ -1,0 +1,9 @@
+data
+logs
+src
+.env
+data_lake
+dags/.env
+s3_storage/*
+.idea
+eda_files/*.html
