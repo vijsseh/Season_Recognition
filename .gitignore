@@ -7,3 +7,4 @@ dags/.env
 s3_storage/*
 .idea
 eda_files/*.html
+photo/*
