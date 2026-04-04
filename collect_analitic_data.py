@@ -8,11 +8,16 @@ from folium.plugins import HeatMap
 from minio import Minio
 from minio.error import S3Error
 import base64
+from dotenv import load_dotenv
+
+load_dotenv()
+ACCESS_KEY = os.getenv('MINIO_ROOT_USER')
+SECRET_KEY = os.getenv('MINIO_ROOT_PASSWORD')
 
 client = Minio(
     "localhost:9002",
-    access_key="admin",
-    secret_key="admin123",
+    access_key=ACCESS_KEY,
+    secret_key=SECRET_KEY,
     secure=False
 )
 bucket_name = 'testseasons'
