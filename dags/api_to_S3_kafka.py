@@ -177,7 +177,7 @@ default_args = {
 with DAG(
     dag_id='minio_streetview_dag',
     description='Загрузка изображений из Google Street View в MinIO',
-    schedule_interval=None,  # можно настроить расписание, например, ежедневно
+    schedule_interval=None,
     start_date=datetime(2026, 3, 16),
     catchup=False,
     default_args=default_args,
