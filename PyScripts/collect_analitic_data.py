@@ -100,6 +100,15 @@ month_counts = df['season'].value_counts(normalize=True)
 print(df['season'].value_counts())
 month_counts = month_counts.sort_index()
 
+print(df['mean_temp'].mean())
+print(df['mean_temp'].std())
+print(df['lat'].mean())
+print(df['lat'].std())
+print(df['lng'].mean())
+print(df['lng'].std())
+print(df['elevation'].mean())
+print(df['elevation'].std())
+
 month_counts.plot.pie(autopct='%1.1f%%', figsize=(5, 5), startangle=90)
 plt.title('Процент записей по сезонам')
 plt.ylabel('')  # Убираем метку оси Y

@@ -17,6 +17,7 @@ bucket_name = "testseasons"
 s3_hook = S3Hook(aws_conn_id="minios3_conn")
 
 
+
 # Функция для получения случайных координат
 def get_random_coords(lat_min: int, lat_max: int, lon_min: int, lon_max: int) -> tuple:
     lat = random.uniform(lat_min, lat_max)
@@ -208,3 +209,6 @@ with DAG(
     )
 
 [upload_task, enrich_event]
+
+if __name__ == "__main__":
+    print(1)

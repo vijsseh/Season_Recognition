@@ -4,6 +4,7 @@ import json
 from airflow import DAG
 from airflow.decorators import task
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+from airflow.operators.dummy import DummyOperator
 from datetime import datetime, timedelta
 
 
@@ -14,16 +15,17 @@ default_args = {
     'email_on_failure': False,
     'email_on_retry': False,
     'retries': 0,
-    'retry_delay': timedelta(minutes=5),
+    # 'retry_delay': timedelta(minutes=5),
 }
 
 with DAG(
     dag_id='trigger_dags_w_conf',
     start_date=datetime(2026, 3, 31),
-    schedule_interval='@daily',
     default_args=default_args,
+    schedule_interval='@daily',
     tags=['base'],
     max_active_runs=1,
+    catchup=False,
 ) as dag:
     trigger_dagrun_europe = TriggerDagRunOperator(
         task_id='trigger_dagrun_europe',
@@ -54,5 +56,8 @@ with DAG(
         trigger_dag_id='minio_streetview_dag',
         conf={"continent": "asia", "api_n": 1000},
     )
+    end = DummyOperator(
+        task_id='end',
+    )
 
-[trigger_dagrun_europe, trigger_dagrun_sa, trigger_dagrun_na, trigger_dagrun_eurasia, trigger_dagrun_asia]
+[trigger_dagrun_europe, trigger_dagrun_sa, trigger_dagrun_na, trigger_dagrun_eurasia, trigger_dagrun_asia] >> end
