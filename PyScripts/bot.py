@@ -9,7 +9,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
 from PIL import Image
 
-# 1. Настройки бота и устройства
+
 TOKEN = "8633413200:AAGqiHLbwT94svdhgkL-ftkCIvJ2tuIaT2I"
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -54,44 +54,38 @@ class SeasnonNN(nn.Module):
 
 # 3. Инициализация и загрузка модели при старте бота
 model = SeasnonNN(num_class=4)
-# Укажите точный путь к файлу весов
+
 PATH_TO_WEIGHTS = "season_model2.pth"
 
 if os.path.exists(PATH_TO_WEIGHTS):
     model.load_state_dict(torch.load(PATH_TO_WEIGHTS, map_location=device))
     model = model.to(device)
-    model.eval()  # Обязательно для BN и Dropout слоев
+    model.eval()
     logging.info("Модель успешно загружена!")
 else:
     logging.warning(f"Файл весов {PATH_TO_WEIGHTS} не найден! Бот будет выдавать ошибку при обработке.")
 
-# Transform для картинок (как при обучении)
 img_transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor(),
     transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
 ])
 
-# Список названий ваших классов (измените под вашу задачу)
 CLASS_NAMES = ["Зима", "Весна", "Лето", "Осень"]
 
 
 # Функция инференса (предсказания)
 def predict_season(image_path: str, raw_features: list) -> str:
     try:
-        # Предобработка картинки
         img = Image.open(image_path).convert('RGB')
         img_tensor = img_transform(img).unsqueeze(0).to(device)  # Добавляем размер батча [1, 3, 224, 224]
 
-        # Предобработка признаков таблицы
         lat, lng, elevation, temp = raw_features
 
-        # Нормализуем температуру точно так же, как при обучении
         temp_norm = (temp - MEAN_TEMP_TRAIN) / STD_TEMP_TRAIN
 
         features = torch.tensor([[lat, lng, elevation, temp_norm]], dtype=torch.float32).to(device)
 
-        # Прогон через модель
         with torch.no_grad():
             logits = model(img_tensor, features)
             predicted_idx = torch.argmax(logits, dim=1).item()
@@ -125,8 +119,6 @@ async def handle_photo(message: Message):
         return
 
     try:
-        # Парсим числа из описания (капшена)
-        # Ожидаем формат: "0.5, -0.2, 0.1, 15.5"
         raw_features = [float(x.strip()) for x in message.caption.replace(',', ' ').split()]
 
         if len(raw_features) != 4:
@@ -138,7 +130,6 @@ async def handle_photo(message: Message):
             "Не удалось распознать числа в описании. Убедитесь, что там только цифры и точки. Пример: `0.5, -0.2, 0.1, 15.5`")
         return
 
-    # Если с фичами всё ок, качаем фото
     photo = message.photo[-1]
     await message.answer("Получил данные. Модель обрабатывает запрос...")
 
@@ -148,8 +139,6 @@ async def handle_photo(message: Message):
         file_info = await bot.get_file(photo.file_id)
         await bot.download_file(file_info.file_path, destination=local_filename)
 
-        # Вызываем функцию предсказания, передавая путь к фото и список фич
-        # Использование asyncio.to_thread не дает тяжелой модели "замораживать" бота для других юзеров
         ml_result = await asyncio.to_thread(predict_season, local_filename, raw_features)
 
         await message.reply(f"Результат анализа:\n\n{ml_result}")

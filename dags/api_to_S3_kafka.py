@@ -83,54 +83,83 @@ def consume_from_kafka(**context) -> None:
 
     consumer.assign([TopicPartition(topic='metadata', partition=partition)])
     try:
-        timeout_ms = 1000  # Таймаут на 1 секунду
-        message_count = 0  # Считаем количество полученных сообщений
+        timeout_ms = 500 # Таймаут на 1 секунду
+        # Инициализация счетчика ДО цикла, иначе он всегда сбрасывается
+        streak = 0
+        message_count = 0
 
         while True:
-            partitions = consumer.assignment()
+            # poll() в confluent_kafka возвращает ОДНО сообщение за раз из внутренного буфера пакета
             msg = consumer.poll(timeout=timeout_ms / 1000)
 
             if msg is None:
+                streak += 1
+                if streak > 150:
+                    print("Кафка простаивает. Завершение работы.")
+                    break  # Для Airflow DAG лучше использовать break, чтобы корректно выйти из функции
                 print("No message received")
                 continue
+            else:
+                print(msg.value().decode('utf-8'))
+                streak = 0
+
+            # Если сообщение получено, сбрасываем стрик пустых ответов
+            streak = 0
 
             if msg.error():
                 if msg.error().code() == KafkaError._PARTITION_EOF:
-                    print(f"End of partition reached {msg.partition}")
+                    print(f"End of partition reached {msg.partition()}")
                 else:
                     raise KafkaException(msg.error())
-            else:
-                message_count += 1
-                print(f"{message_count} Received message: {msg.value().decode('utf-8')}, партиции: {partitions}")
-                data = json.loads(msg.value().decode('utf-8'))
-                lat, lng = data['location']['lat'], data['location']['lng']
-                year_month = data['date']
-                key = str(lat) + 'x' + str(lng) + 'x' + str(year_month) + '/data.json'
+                continue
 
-                # Получаем данные о погоде
+            # Обработка успешного сообщения
+            message_count += 1
+            partitions = consumer.assignment()
+            print(f"{message_count} Received message, партиции: {partitions}")
+
+            try:
+                data = json.loads(msg.value().decode('utf-8'))
+                lat = data['location']['lat']
+                lng = data['location']['lng']
+                year_month = data['date']
+                key = f"{lat}x{lng}x{year_month}/data.json"
+
+                # Делаем сразу GET запрос (минус один сетевой запрос)
                 url = f'https://archive-api.open-meteo.com/v1/archive?latitude={lat}&longitude={lng}&start_date={year_month}-01&end_date={year_month}-28&daily=temperature_2m_mean&timezone=auto'
 
-                try:
-                    response = requests.head(url, timeout=5)
-                    if response.status_code == 200:
-                        response_temp = requests.get(url)
-                        print(f'GOT HTTP RESPONSE FROM API: {response_temp.status_code}')
+                response = requests.get(url, timeout=(3.05, 3))
 
-                        if 'error' not in response_temp:
-                            data['elevation'] = response_temp.json()['elevation']
-                            data['units_temp'] = response_temp.json()['daily_units']['temperature_2m_mean']
-                            data['mean_temp'] = sum(response_temp.json()['daily']['temperature_2m_mean']) / len(response_temp.json()['daily']['temperature_2m_mean'])
+                if response.status_code == 200:
+                    res_json = response.json()
+                    print(f'GOT HTTP RESPONSE FROM API: {response.status_code}')
 
-                        # Дополняем сообщение
+                    if 'error' not in res_json:
+                        res_daily = res_json.get('daily', {})
+                        temps = res_daily.get('temperature_2m_mean', [])
+
+                        # Защита от пустых списков температур во избежание ZeroDivisionError
+                        if temps:
+                            data['elevation'] = res_json.get('elevation')
+                            data['units_temp'] = res_json.get('daily_units', {}).get('temperature_2m_mean')
+                            data['mean_temp'] = sum(temps) / len(temps)
+
+                        # Дополняем сообщение и отправляем в S3
                         edited_data = json.dumps(data).encode('utf-8')
-
-                        # Загружаем в S3
                         s3_hook.load_bytes(edited_data, key=key, bucket_name=bucket_name, replace=True)
                         print('UPLOAD JSON TO MINIO')
                     else:
-                        print(f'GOT HTTP RESPONSE FROM API: {response_temp.status_code}')
-                except:
-                    print('Нет ответа от апи')
+                        print(f"API returned error: {res_json['error']}")
+                else:
+                    print(f'API responded with status code: {response.status_code}')
+
+            except requests.RequestException as e:
+                print(f'Ошибка сети или таймаут API: {e}')
+            except (json.JSONDecodeError, KeyError) as e:
+                print(f'Ошибка валидации/парсинга данных: {e}')
+            except Exception as e:
+                print(f'Непредвиденная ошибка: {e}')
+
     except KeyboardInterrupt:
         print("Process interrupted")
     finally:
