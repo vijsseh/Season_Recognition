@@ -1,46 +1,42 @@
 import asyncio
-import logging
-import os
+import io
 import torch
 import torch.nn as nn
-from torchvision import models
-import torchvision.transforms as transforms
+from torchvision import models, transforms
+from PIL import Image
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
-from PIL import Image
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 
 
-TOKEN = "8633413200:AAGqiHLbwT94svdhgkL-ftkCIvJ2tuIaT2I"
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-bot = Bot(token=TOKEN)
-dp = Dispatcher()
-logging.basicConfig(level=logging.INFO)
-
-# КОНСТАНТЫ ДЛЯ МАСШТАБИРОВАНИЯ ТЕМПЕРАТУРЫ
-# Замените эти значения на среднее (mean) и отклонение (std) из вашего TRAIN датасета!
-MEAN_TEMP_TRAIN = 15.318994134972797  # Пример значения
-STD_TEMP_TRAIN = 9.459355684811385  # Пример значения
-
-
-# 2. Архитектура вашей нейросети
 class SeasnonNN(nn.Module):
     def __init__(self, num_class=4):
         super().__init__()
-        self.resnet = models.resnet50(weights=None)  # Веса загрузим из файла
+        self.resnet = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
+        for par in self.resnet.parameters():
+            par.requires_grad = False
+        for param in self.resnet.layer4.parameters():
+            param.requires_grad = True
         self.resnet.fc = nn.Identity()
 
+        # Обновленная архитектура табличной части
         self.tableNN = nn.Sequential(
-            nn.Linear(4, 16),
-            nn.BatchNorm1d(16),
+            nn.Linear(4, 32),
+            nn.BatchNorm1d(32),
             nn.ReLU(),
-            nn.Linear(16, 32),
+            nn.Linear(32, 64),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
             nn.ReLU()
         )
+
         self.finclassifier = nn.Sequential(
-            nn.Linear(2048 + 32, 256),
+            nn.Linear(2048 + 64, 256),
             nn.ReLU(),
-            nn.Dropout(0.4),
+            nn.Dropout(0.5),
             nn.Linear(256, 4)
         )
 
@@ -52,108 +48,132 @@ class SeasnonNN(nn.Module):
         return p
 
 
-# 3. Инициализация и загрузка модели при старте бота
-model = SeasnonNN(num_class=4)
 
-PATH_TO_WEIGHTS = "season_model2.pth"
+BOT_TOKEN = "8633413200:AAGqiHLbwT94svdhgkL-ftkCIvJ2tuIaT2I"  # Твой токен
 
-if os.path.exists(PATH_TO_WEIGHTS):
-    model.load_state_dict(torch.load(PATH_TO_WEIGHTS, map_location=device))
-    model = model.to(device)
-    model.eval()
-    logging.info("Модель успешно загружена!")
-else:
-    logging.warning(f"Файл весов {PATH_TO_WEIGHTS} не найден! Бот будет выдавать ошибку при обработке.")
+# 🛑 НОВЫЕ ДАННЫЕ ДЛЯ НОРМАЛИЗАЦИИ
+TEMP_MEAN = 15.024931328762243
+TEMP_STD = 9.508946785361216
 
-img_transform = transforms.Compose([
+LAT_MEAN = 44.64154238191048
+LAT_STD = 13.630374623501336
+
+LNG_MEAN = 49.20748828978892
+LNG_STD = 47.90025076135358
+
+ELEVATION_MEAN = 601.3890909090909
+ELEVATION_STD = 873.2692353925235
+
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher()
+
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+model = SeasnonNN(num_class=4).to(device)
+
+model.load_state_dict(torch.load('finalMODEL2.pth', map_location=device))
+
+model.eval()
+
+image_transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor(),
-    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+    transforms.Normalize([0.485, 0.456, 0.406],
+                         [0.229, 0.224, 0.225]),
 ])
 
-CLASS_NAMES = ["Зима", "Весна", "Лето", "Осень"]
+# Классы (0, 1, 2, 3)
+CLASS_NAMES = {
+    0: "Зима ❄️",
+    1: "Весна 🌸",
+    2: "Лето ☀️",
+    3: "Осень 🍁"
+}
 
 
-# Функция инференса (предсказания)
-def predict_season(image_path: str, raw_features: list) -> str:
-    try:
-        img = Image.open(image_path).convert('RGB')
-        img_tensor = img_transform(img).unsqueeze(0).to(device)  # Добавляем размер батча [1, 3, 224, 224]
-
-        lat, lng, elevation, temp = raw_features
-
-        temp_norm = (temp - MEAN_TEMP_TRAIN) / STD_TEMP_TRAIN
-
-        features = torch.tensor([[lat, lng, elevation, temp_norm]], dtype=torch.float32).to(device)
-
-        with torch.no_grad():
-            logits = model(img_tensor, features)
-            predicted_idx = torch.argmax(logits, dim=1).item()
-
-        # Возвращаем красивый ответ
-        return f"Прогноз модели: {CLASS_NAMES[predicted_idx]} (Класс {predicted_idx})"
-
-    except Exception as e:
-        return f"Ошибка внутри модели: {e}"
+class PredictionState(StatesGroup):
+    waiting_for_image = State()
+    waiting_for_features = State()
 
 
-# Обработка команды /start
-@dp.message(F.text == "/start")
-async def cmd_start(message: Message):
+@dp.message(Command("start"))
+async def cmd_start(message: Message, state: FSMContext):
     await message.answer(
-        "Привет! Я мультимодальная нейросеть.\n\n"
-        "Отправь мне **фотографию**, а в **описании (подписи) к ней** "
-        "укажи через запятую 4 числа: \n"
-        "`lat_norm, lng_norm, elevation_norm, mean_temp`\n\n"
-        "Пример подписи: `0.54, -0.12, 0.3, 18.5`"
+        "Привет! Я бот для классификации сезонов.\n"
+        "Пожалуйста, отправь мне **фотографию**."
     )
+    await state.set_state(PredictionState.waiting_for_image)
 
 
-# Обработка входящих фотографий
-@dp.message(F.photo)
-async def handle_photo(message: Message):
-    # Проверяем, передал ли пользователь текстовые фичи в описании к фото
-    if not message.caption:
-        await message.reply(
-            "Пожалуйста, отправьте фото ПОВТОРНО и добавьте к нему описание с параметрами: `lat, lng, elevation, temp`")
-        return
-
-    try:
-        raw_features = [float(x.strip()) for x in message.caption.replace(',', ' ').split()]
-
-        if len(raw_features) != 4:
-            await message.reply(
-                "Ошибка: в описании должно быть ровно 4 числа через запятую или пробел!\nПример: `0.5, -0.2, 0.1, 15.5`")
-            return
-    except ValueError:
-        await message.reply(
-            "Не удалось распознать числа в описании. Убедитесь, что там только цифры и точки. Пример: `0.5, -0.2, 0.1, 15.5`")
-        return
-
+@dp.message(PredictionState.waiting_for_image, F.photo)
+async def handle_photo(message: Message, state: FSMContext):
     photo = message.photo[-1]
-    await message.answer("Получил данные. Модель обрабатывает запрос...")
+    photo_bytes = io.BytesIO()
+    await bot.download(photo, destination=photo_bytes)
 
-    local_filename = f"temp_{photo.file_id}.jpg"
+    await state.update_data(image_bytes=photo_bytes.getvalue())
 
+    # Просим РЕАЛЬНЫЕ данные
+    await message.answer(
+        "Фото получено! Теперь отправь 4 числа через пробел (реальные значения):\n"
+        "`широта долгота высота(м) температура(°C)`\n\n"
+        "*(Например, координаты Москвы:)* `55.75 37.61 150 12.5`",
+        parse_mode="Markdown"
+    )
+    await state.set_state(PredictionState.waiting_for_features)
+
+
+@dp.message(PredictionState.waiting_for_features, F.text)
+async def handle_features(message: Message, state: FSMContext):
     try:
-        file_info = await bot.get_file(photo.file_id)
-        await bot.download_file(file_info.file_path, destination=local_filename)
+        numbers = list(map(float, message.text.replace(',', '.').split()))
+        if len(numbers) != 4:
+            raise ValueError
 
-        ml_result = await asyncio.to_thread(predict_season, local_filename, raw_features)
+        raw_lat, raw_lng, raw_elevation, raw_temp = numbers
 
-        await message.reply(f"Результат анализа:\n\n{ml_result}")
 
-    except Exception as e:
-        logging.error(f"Ошибка при обработке: {e}")
-        await message.answer("Произошла ошибка при загрузке или обработке изображения.")
+        norm_lat = (raw_lat - LAT_MEAN) / LAT_STD
+        norm_lng = (raw_lng - LNG_MEAN) / LNG_STD
+        norm_elevation = (raw_elevation - ELEVATION_MEAN) / ELEVATION_STD
+        norm_temp = (raw_temp - TEMP_MEAN) / TEMP_STD
 
-    finally:
-        if os.path.exists(local_filename):
-            os.remove(local_filename)
+        user_data = await state.get_data()
+        image_bytes = user_data['image_bytes']
+
+        # Готовим картинку
+        image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+        image_tensor = image_transform(image).unsqueeze(0).to(device)
+
+        # Готовим признаки: передаем в тензор уже НОРМАЛИЗОВАННЫЕ значения
+        features_tensor = torch.tensor([[norm_lat, norm_lng, norm_elevation, norm_temp]], dtype=torch.float32).to(
+            device)
+
+        # Делаем предсказание
+        with torch.no_grad():
+            output = model(image_tensor, features_tensor)
+            predicted_class = torch.argmax(output, dim=1).item()
+
+        result_text = CLASS_NAMES.get(predicted_class, f"Неизвестный класс: {predicted_class}")
+
+        await message.answer(
+            f"🧠 Нейросеть предсказывает: **{result_text}**\n\n"
+            f"*(Нормализованные данные для модели: lat={norm_lat:.2f}, lng={norm_lng:.2f}, elev={norm_elevation:.2f}, temp={norm_temp:.2f})*",
+            parse_mode="Markdown"
+        )
+
+        await message.answer("Отправь новую фотографию, если хочешь повторить.")
+        await state.set_state(PredictionState.waiting_for_image)
+
+    except ValueError:
+        await message.answer(
+            "❌ Ошибка формата. Пожалуйста, введи ровно 4 числа через пробел (можно использовать точки или минусы).\n"
+            "Пример: `55.75 37.61 150 12.5`", parse_mode="Markdown"
+        )
 
 
 async def main():
-    await bot.delete_webhook(drop_pending_updates=True)
+    print("Бот запущен и готов к работе!")
     await dp.start_polling(bot)
 
 

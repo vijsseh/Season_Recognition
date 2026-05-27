@@ -230,7 +230,7 @@ def make_html():
                         <strong>Pano ID:</strong> {row['pano_id']}<br>
                         <strong>Date:</strong> {row['date']}<br>
                         <strong>Mean Temperature:</strong> {row['mean_temp']}<br>
-                        <img src="data:image/jpeg;base64,{photo_base64}"  width="300" height="300">
+                        <img src="data:image/jpeg;base64,{photo_base64}"  width="100" height="100">
                         """
 
             if row['lat'] and row['lng']:
