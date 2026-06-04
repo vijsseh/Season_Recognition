@@ -184,34 +184,6 @@ def collect_json_data_from_minio():
     df = pd.DataFrame(all_dataframe_data)
     return df
 
-
-# directory = "/home/dmitriy/PycharmProjects/season_pipline/s3_storage/highresolutionseasons"
-objects = client.list_objects(bucket_name)
-
-df = collect_json_data_from_minio()
-# df['lat'] = df['lat'].astype('float16')
-# df['lng'] = df['lng'].astype('float16')
-month_counts = df['season'].value_counts(normalize=True)
-print(df['season'].value_counts())
-month_counts = month_counts.sort_index()
-
-# print(df['mean_temp'].mean())
-# print(df['mean_temp'].std())
-# print(df['lat'].mean())
-# print(df['lat'].std())
-# print(df['lng'].mean())
-# print(df['lng'].std())
-# print(df['elevation'].mean())
-# print(df['elevation'].std())
-
-month_counts.plot.pie(autopct='%1.1f%%', figsize=(5, 5), startangle=90)
-plt.title('Процент записей по сезонам')
-plt.ylabel('')  # Убираем метку оси Y
-plt.savefig('eda_files/month_percentage_pie_chart.png', bbox_inches='tight')
-
-
-df.to_csv("eda_files/metadata.csv", index=False)  # Можно сохранить в CSV файл
-
 def make_html():
     for season in df['season'].unique():
         season_df = df[df['season'] == season]
@@ -240,4 +212,25 @@ def make_html():
                 ).add_to(m)
         m.save(f'eda_files/{season}_locations_map.html')
 
-# make_html()
+
+# directory = "/home/dmitriy/PycharmProjects/season_pipline/s3_storage/highresolutionseasons"
+if __name__ == '__main__':
+    objects = client.list_objects(bucket_name)
+
+    df = collect_json_data_from_minio()
+    # df['lat'] = df['lat'].astype('float16')
+    # df['lng'] = df['lng'].astype('float16')
+    month_counts = df['season'].value_counts(normalize=True)
+    print(df['season'].value_counts())
+    month_counts = month_counts.sort_index()
+
+    month_counts.plot.pie(autopct='%1.1f%%', figsize=(5, 5), startangle=90)
+    plt.title('Процент записей по сезонам')
+    plt.ylabel('')  # Убираем метку оси Y
+    plt.savefig('eda_files/month_percentage_pie_chart.png', bbox_inches='tight')
+
+
+    df.to_csv("eda_files/metadata.csv", index=False)  # Можно сохранить в CSV файл
+
+
+    # make_html()

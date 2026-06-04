@@ -20,7 +20,6 @@ class SeasnonNN(nn.Module):
             param.requires_grad = True
         self.resnet.fc = nn.Identity()
 
-        # Обновленная архитектура табличной части
         self.tableNN = nn.Sequential(
             nn.Linear(4, 32),
             nn.BatchNorm1d(32),

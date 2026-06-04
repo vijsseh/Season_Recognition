@@ -65,30 +65,30 @@ class SeasnonNN(nn.Module):
         p = self.finclassifier(concat)
         return p
 
+if __name__ == '__main__':
+    df = pd.read_csv(r"C:\Users\Gaming PC\pythonproject\dataset\train.csv", sep=',')
+    newdf = df[['image_path', 'label', 'lat_norm', 'lng_norm', 'elevation_norm', 'mean_temp']].copy()
+    newdf['mean_temp'] = (newdf['mean_temp'] - newdf['mean_temp'].mean()) / newdf['mean_temp'].std()
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    train = SeasonsDataset(newdf)
+    train_loader = data.DataLoader(train, batch_size=16, shuffle=True)
+    model = SeasnonNN(num_class=4).to(device)
+    loss = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
+    for epoch in range(21):
+        model.train()
+        train_loss = 0
+        if epoch % 5 == 0:
+            print(f"Epoch {epoch} | loss: {train_loss / len(train_loader):.4f}")
+        for (image, features), labels in train_loader:
+            image = image.to(device)
+            features = features.to(device)
+            labels = labels.to(device)
+            optimizer.zero_grad()
+            result = model(image, features)
+            res_loss = loss(result, labels)
+            res_loss.backward()
+            optimizer.step()
+            train_loss += res_loss.item()
 
-df = pd.read_csv(r"C:\Users\Gaming PC\pythonproject\dataset\train.csv", sep=',')
-newdf = df[['image_path', 'label', 'lat_norm', 'lng_norm', 'elevation_norm', 'mean_temp']].copy()
-newdf['mean_temp'] = (newdf['mean_temp'] - newdf['mean_temp'].mean()) / newdf['mean_temp'].std()
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-train = SeasonsDataset(newdf)
-train_loader = data.DataLoader(train, batch_size=16, shuffle=True)
-model = SeasnonNN(num_class=4).to(device)
-loss = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
-for epoch in range(21):
-    model.train()
-    train_loss = 0
-    if epoch % 5 == 0:
-        print(f"Epoch {epoch} | loss: {train_loss / len(train_loader):.4f}")
-    for (image, features), labels in train_loader:
-        image = image.to(device)
-        features = features.to(device)
-        labels = labels.to(device)
-        optimizer.zero_grad()
-        result = model(image, features)
-        res_loss = loss(result, labels)
-        res_loss.backward()
-        optimizer.step()
-        train_loss += res_loss.item()
-
-torch.save(model.state_dict(), 'season_model2.pth')
+    torch.save(model.state_dict(), 'season_model2.pth')

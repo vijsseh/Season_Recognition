@@ -83,27 +83,24 @@ def consume_from_kafka(**context) -> None:
 
     consumer.assign([TopicPartition(topic='metadata', partition=partition)])
     try:
-        timeout_ms = 500 # Таймаут на 1 секунду
-        # Инициализация счетчика ДО цикла, иначе он всегда сбрасывается
+        timeout_ms = 500
         streak = 0
         message_count = 0
 
         while True:
-            # poll() в confluent_kafka возвращает ОДНО сообщение за раз из внутренного буфера пакета
             msg = consumer.poll(timeout=timeout_ms / 1000)
 
             if msg is None:
                 streak += 1
                 if streak > 150:
                     print("Кафка простаивает. Завершение работы.")
-                    break  # Для Airflow DAG лучше использовать break, чтобы корректно выйти из функции
+                    break
                 print("No message received")
                 continue
             else:
                 print(msg.value().decode('utf-8'))
                 streak = 0
 
-            # Если сообщение получено, сбрасываем стрик пустых ответов
             streak = 0
 
             if msg.error():
@@ -113,7 +110,6 @@ def consume_from_kafka(**context) -> None:
                     raise KafkaException(msg.error())
                 continue
 
-            # Обработка успешного сообщения
             message_count += 1
             partitions = consumer.assignment()
             print(f"{message_count} Received message, партиции: {partitions}")
@@ -125,7 +121,6 @@ def consume_from_kafka(**context) -> None:
                 year_month = data['date']
                 key = f"{lat}x{lng}x{year_month}/data.json"
 
-                # Делаем сразу GET запрос (минус один сетевой запрос)
                 url = f'https://archive-api.open-meteo.com/v1/archive?latitude={lat}&longitude={lng}&start_date={year_month}-01&end_date={year_month}-28&daily=temperature_2m_mean&timezone=auto'
 
                 response = requests.get(url, timeout=(3.05, 3))
@@ -138,13 +133,12 @@ def consume_from_kafka(**context) -> None:
                         res_daily = res_json.get('daily', {})
                         temps = res_daily.get('temperature_2m_mean', [])
 
-                        # Защита от пустых списков температур во избежание ZeroDivisionError
+
                         if temps:
                             data['elevation'] = res_json.get('elevation')
                             data['units_temp'] = res_json.get('daily_units', {}).get('temperature_2m_mean')
                             data['mean_temp'] = sum(temps) / len(temps)
 
-                        # Дополняем сообщение и отправляем в S3
                         edited_data = json.dumps(data).encode('utf-8')
                         s3_hook.load_bytes(edited_data, key=key, bucket_name=bucket_name, replace=True)
                         print('UPLOAD JSON TO MINIO')
@@ -201,7 +195,7 @@ def run_dag(**context) -> str:
 
 default_args = {
     "retries": 5,
-    "retry_delay": timedelta(seconds=5), ## между попытками ждем 10 секунд
+    "retry_delay": timedelta(seconds=5),
 }
 
 with DAG(
@@ -239,5 +233,3 @@ with DAG(
 
 [upload_task, enrich_event]
 
-if __name__ == "__main__":
-    print(1)
