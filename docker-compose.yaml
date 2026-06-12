@@ -130,8 +130,26 @@ services:
     depends_on:
       - kafka
 
+  kafka-init:
+    image: 'confluentinc/cp-kafka:7.7.0'
+    container_name: 'kafka-init'
+    depends_on:
+      - kafka
+    command: >
+      bash -c "
+        echo 'Ожидаем полную готовность Kafka...'
+        # cub kafka-ready — утилита Confluent, проверяющая доступность брокера
+        cub kafka-ready -b kafka:9093 1 30
+
+        echo 'Создаем топики...'
+        kafka-topics --bootstrap-server kafka:9093 --create --if-not-exists --topic metadata --partitions 5 --replication-factor 1
+
+        echo 'Все топики успешно проверены/созданы!'
+      "
+
   postgres:
     image: postgres:13
+    container_name: 'airflow-db'
     environment:
       POSTGRES_USER: airflow
       POSTGRES_PASSWORD: airflow
@@ -150,6 +168,7 @@ services:
     # Redis is limited to 7.2-bookworm due to licencing change
     # https://redis.io/blog/redis-adopts-dual-source-available-licensing/
     image: redis:7.2-bookworm
+    container_name: 'redis'
     expose:
       - 6379
     healthcheck:
@@ -163,6 +182,7 @@ services:
   airflow-webserver:
     <<: *airflow-common
     command: webserver
+    container_name: 'airflow-webserver'
     ports:
       - "8080:8080"
     healthcheck:
@@ -177,9 +197,10 @@ services:
       airflow-init:
         condition: service_completed_successfully
 
-  airflow-scheduler:
+  airflow-sche1duler:
     <<: *airflow-common
     command: scheduler
+    container_name: 'airflow-scheduler'
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
       interval: 30s
@@ -195,6 +216,7 @@ services:
   airflow-worker:
     <<: *airflow-common
     command: celery worker
+    container_name: 'airflow-worker'
     healthcheck:
       # yamllint disable rule:line-length
       test:
@@ -218,6 +240,7 @@ services:
   airflow-triggerer:
     <<: *airflow-common
     command: triggerer
+    container_name: 'airflow-triggerer'
     healthcheck:
       test: ["CMD-SHELL", 'airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"']
       interval: 30s
@@ -232,6 +255,7 @@ services:
 
   airflow-init:
     <<: *airflow-common
+    container_name: 'airflow-init'
     entrypoint: /bin/bash
     # yamllint disable rule:line-length
     command:
@@ -261,6 +285,7 @@ services:
 
   airflow-cli:
     <<: *airflow-common
+    container_name: 'airflow-cli'
     profiles:
       - debug
     environment:

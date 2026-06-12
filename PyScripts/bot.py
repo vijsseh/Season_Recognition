@@ -9,6 +9,7 @@ from aiogram.types import Message
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from airflow.models.param import Param
 
 class SeasnonNN(nn.Module):
     def __init__(self, num_class=4):

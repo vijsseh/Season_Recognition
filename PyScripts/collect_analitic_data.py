@@ -10,7 +10,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 ACCESS_KEY = os.getenv('MINIO_ROOT_USER')
-SECRET_KEY = os.getenv('MINIO_ROOT_PASSWORD')
+SECRET_KEY = os.gete
+nv('MINIO_ROOT_PASSWORD')
 
 client = Minio(
     "localhost:9002",
